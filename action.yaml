@@ -1,0 +1,103 @@
+name: "Prova Run Action"
+description: "GitHub Action to run a Prova acceptance/integration test suite https://github.com/prova-rs/prova"
+branding:
+  icon: "check-circle"
+  color: "blue"
+inputs:
+  version:
+    description: The Prova version to install (https://github.com/prova-rs/prova/releases)
+    required: false
+    default: "v0.1.0"
+  paths:
+    description: Files or directories to run. Omit to run the suite declared in the manifest.
+    required: false
+    default: ""
+  manifest:
+    description: Path to the suite manifest.
+    required: false
+    default: "prova.toml"
+  profile:
+    description: Manifest profile to run (prova --profile <profile>).
+    required: false
+    default: ""
+  jobs:
+    description: Run up to N units concurrently.
+    required: false
+    default: ""
+  format:
+    description: "Output format: console or json."
+    required: false
+    default: "console"
+  working-directory:
+    description: Directory to run prova from.
+    required: false
+    default: "."
+  args:
+    description: Additional command-line arguments appended to the prova invocation.
+    required: false
+    default: ""
+runs:
+  using: "composite"
+  steps:
+    - name: Install Prova
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        # Match the archive to the runner. Prova publishes linux-x86_64, linux-arm64 and
+        # macos-arm64 tarballs; anything else has no release archive to install.
+        case "$(uname -s)" in
+          Linux)  platform=linux ;;
+          Darwin) platform=macos ;;
+          *) echo "::error::prova-rs/run-action supports Linux and macOS runners only"; exit 1 ;;
+        esac
+        case "$(uname -m)" in
+          x86_64|amd64)  arch=x86_64 ;;
+          aarch64|arm64) arch=arm64 ;;
+          *) echo "::error::unsupported runner architecture $(uname -m)"; exit 1 ;;
+        esac
+        if [ "$platform" = "macos" ] && [ "$arch" = "x86_64" ]; then
+          echo "::error::Prova publishes no macos-x86_64 archive; use an arm64 macOS runner"
+          exit 1
+        fi
+
+        prefix="prova-${VERSION}-${platform}-${arch}"
+        archive="${prefix}.tar.gz"
+        echo "Downloading ${archive}"
+        cd "${RUNNER_TEMP}"
+        curl --fail --silent --show-error -LO \
+          "https://github.com/prova-rs/prova/releases/download/${VERSION}/${archive}"
+        tar -xzf "${archive}"
+        mv "./${prefix}/prova" .
+        chmod +x ./prova
+        # Put prova on PATH so later steps in the job can invoke it directly too.
+        echo "${RUNNER_TEMP}" >> "$GITHUB_PATH"
+
+    - name: Run Prova
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PATHS: ${{ inputs.paths }}
+        MANIFEST: ${{ inputs.manifest }}
+        PROFILE: ${{ inputs.profile }}
+        JOBS: ${{ inputs.jobs }}
+        FORMAT: ${{ inputs.format }}
+        EXTRA_ARGS: ${{ inputs.args }}
+      run: |
+        set -euo pipefail
+
+        flags=(--format "${FORMAT}")
+        # Explicit paths bypass the manifest entirely, so only pass --manifest/--profile
+        # when the run is manifest-driven.
+        if [ -n "${PATHS}" ]; then
+          :
+        else
+          flags+=(--manifest "${MANIFEST}")
+          if [ -n "${PROFILE}" ]; then flags+=(--profile "${PROFILE}"); fi
+        fi
+        if [ -n "${JOBS}" ]; then flags+=(--jobs "${JOBS}"); fi
+
+        # Word-split PATHS and EXTRA_ARGS the way a shell command line would.
+        "${RUNNER_TEMP}/prova" "${flags[@]}" ${EXTRA_ARGS} ${PATHS}
