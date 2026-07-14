@@ -36,6 +36,16 @@ inputs:
     description: Additional command-line arguments appended to the prova invocation.
     required: false
     default: ""
+  plugins:
+    description: |
+      Ad-hoc plugins to register, one `name = source` per line, layered over the manifest.
+      Source is a path, a git URL, or an org/repo shorthand — e.g. `redis = acme/prova-redis@v1`.
+    required: false
+    default: ""
+  cache-plugins:
+    description: Cache fetched git plugins (~/.cache/prova/plugins) across runs. Set "false" to disable.
+    required: false
+    default: "true"
 runs:
   using: "composite"
   steps:
@@ -75,6 +85,19 @@ runs:
         # Put prova on PATH so later steps in the job can invoke it directly too.
         echo "${RUNNER_TEMP}" >> "$GITHUB_PATH"
 
+    # Reuse fetched git plugins across runs. Prova pins each plugin by ref and clones into
+    # ~/.cache/prova/plugins (XDG cache, same path on Linux and macOS), so a warm cache skips the
+    # clone. Keyed on the manifest so a changed plugin pin invalidates it; restore-keys warm-starts
+    # from any prior cache so only the changed plugins re-fetch.
+    - name: Cache Prova plugins
+      if: ${{ inputs.cache-plugins == 'true' }}
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/prova/plugins
+        key: prova-plugins-${{ runner.os }}-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.manifest)) }}
+        restore-keys: |
+          prova-plugins-${{ runner.os }}-
+
     - name: Run Prova
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -85,6 +108,7 @@ runs:
         JOBS: ${{ inputs.jobs }}
         FORMAT: ${{ inputs.format }}
         EXTRA_ARGS: ${{ inputs.args }}
+        PLUGINS: ${{ inputs.plugins }}
       run: |
         set -euo pipefail
 
@@ -98,6 +122,14 @@ runs:
           if [ -n "${PROFILE}" ]; then flags+=(--profile "${PROFILE}"); fi
         fi
         if [ -n "${JOBS}" ]; then flags+=(--jobs "${JOBS}"); fi
+
+        # Expand the `plugins` input (one `name = source` per line) into --plugin flags. Trim
+        # surrounding whitespace and normalize `name = source` to the `name=source` prova expects.
+        while IFS= read -r line; do
+          line="$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+          [ -z "$line" ] && continue
+          flags+=(--plugin "$(printf '%s' "$line" | sed 's/[[:space:]]*=[[:space:]]*/=/')")
+        done <<< "${PLUGINS}"
 
         # Word-split PATHS and EXTRA_ARGS the way a shell command line would.
         "${RUNNER_TEMP}/prova" "${flags[@]}" ${EXTRA_ARGS} ${PATHS}

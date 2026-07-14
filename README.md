@@ -41,8 +41,28 @@ Run specific files or directories (this bypasses the manifest):
 | `format` | `console` | `console` or `json` (JSONL event stream) |
 | `working-directory` | `.` | Directory to run `prova` from |
 | `args` | — | Extra arguments appended to the invocation |
+| `plugins` | — | Ad-hoc plugins, one `name = source` per line, layered over the manifest |
+| `cache-plugins` | `true` | Cache fetched git plugins across runs (`false` to disable) |
 
 The action also puts `prova` on `PATH`, so later steps in the same job can call it directly.
+
+## Plugins
+
+Plugins declared in `prova.toml`'s `[plugins]` need nothing here — the action fetches and
+**caches** them (`~/.cache/prova/plugins`, keyed on the manifest) so pinned plugins clone once and
+reuse across runs. Disable with `cache-plugins: false`.
+
+Add CI-only plugins (or override a manifest one) with `plugins:`, one `name = source` per line —
+`source` is a path, a git URL, or an `org/repo@ref` shorthand:
+
+```yaml
+- uses: prova-rs/run-action@v1
+  with:
+    profile: ci
+    plugins: |
+      loadtest = acme/prova-loadtest@v2
+      redis    = github:acme/prova-redis@v1
+```
 
 Runners: Linux (x86_64/arm64) and macOS (arm64).
 
