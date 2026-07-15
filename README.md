@@ -48,20 +48,30 @@ The action also puts `prova` on `PATH`, so later steps in the same job can call 
 
 ## Plugins
 
-Plugins declared in `prova.toml`'s `[plugins]` need nothing here — the action fetches and
-**caches** them (`~/.cache/prova/plugins`, keyed on the manifest) so pinned plugins clone once and
-reuse across runs. Disable with `cache-plugins: false`.
+**Declare plugins in `prova.toml`, not here.** Prova fetches, pins, and caches them the same way
+locally and in CI, so `prova` behaves identically everywhere — the whole point. This action needs
+*nothing* for declared plugins beyond running `prova`; it just adds a cache
+(`~/.cache/prova/plugins`, keyed on the manifest) so pinned plugins clone once and reuse across runs.
+Disable with `cache-plugins: false`.
 
-Add CI-only plugins (or override a manifest one) with `plugins:`, one `name = source` per line —
-`source` is a path, a git URL, or an `org/repo@ref` shorthand:
+The `plugins:` input is an **escape hatch**, not a second place to declare dependencies — reach for
+it only when the plugin is a fact about *this CI job*, not the project:
+
+- a **CI-only** capability you don't want every contributor to fetch locally (e.g. a nightly load
+  test), or
+- a job that **generates its suite on the fly** and needs a plugin for the generated code (there's
+  no committed manifest to hold it).
+
+Anything a contributor should also get when they run `prova` locally belongs in `prova.toml`. Used as
+the escape hatch, it takes one `name = source` per line (path, git URL, or `org/repo@ref` shorthand)
+and layers over the manifest:
 
 ```yaml
 - uses: prova-rs/run-action@v1
   with:
-    profile: ci
+    profile: nightly
     plugins: |
-      loadtest = acme/prova-loadtest@v2
-      redis    = github:acme/prova-redis@v1
+      loadtest = acme/prova-loadtest@v2   # CI-only; not in prova.toml on purpose
 ```
 
 Runners: Linux (x86_64/arm64) and macOS (arm64).
