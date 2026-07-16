@@ -7,7 +7,7 @@ inputs:
   version:
     description: The Prova version to install (https://github.com/prova-rs/prova/releases)
     required: false
-    default: "v0.2.3"
+    default: "v0.2.4"
   paths:
     description: Files or directories to run. Omit to run the suite declared in the manifest.
     required: false
