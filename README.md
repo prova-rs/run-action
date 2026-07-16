@@ -33,7 +33,7 @@ Run specific files or directories (this bypasses the manifest):
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `version` | `v0.2.2` | The [Prova release](https://github.com/prova-rs/prova/releases) to install |
+| `version` | `v0.2.3` | The [Prova release](https://github.com/prova-rs/prova/releases) to install |
 | `paths` | — | Files/dirs to run. Set this and the manifest is bypassed. |
 | `manifest` | `prova.toml` | Path to the suite manifest |
 | `profile` | — | Manifest profile to run |
