@@ -13,9 +13,11 @@ inputs:
     required: false
     default: ""
   manifest:
-    description: Path to the suite manifest.
+    description: >-
+      Path to the suite manifest. Omit to let prova discover it (any of the four standard
+      locations: prova.toml, .prova.toml, prova/prova.toml, .prova/prova.toml).
     required: false
-    default: "prova.toml"
+    default: ""
   profile:
     description: Manifest profile to run (prova --profile <profile>).
     required: false
@@ -94,7 +96,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/prova/plugins
-        key: prova-plugins-${{ runner.os }}-${{ hashFiles(format('{0}/{1}', inputs.working-directory, inputs.manifest)) }}
+        key: prova-plugins-${{ runner.os }}-${{ hashFiles(format('{0}/prova.toml', inputs.working-directory), format('{0}/.prova.toml', inputs.working-directory), format('{0}/prova/prova.toml', inputs.working-directory), format('{0}/.prova/prova.toml', inputs.working-directory)) }}
         restore-keys: |
           prova-plugins-${{ runner.os }}-
 
@@ -114,11 +116,12 @@ runs:
 
         flags=(--format "${FORMAT}")
         # Explicit paths bypass the manifest entirely, so only pass --manifest/--profile
-        # when the run is manifest-driven.
+        # when the run is manifest-driven. An empty manifest input means prova discovers the
+        # manifest itself (flat prova.toml/.prova.toml or the prova//.prova/ nook forms).
         if [ -n "${PATHS}" ]; then
           :
         else
-          flags+=(--manifest "${MANIFEST}")
+          if [ -n "${MANIFEST}" ]; then flags+=(--manifest "${MANIFEST}"); fi
           if [ -n "${PROFILE}" ]; then flags+=(--profile "${PROFILE}"); fi
         fi
         if [ -n "${JOBS}" ]; then flags+=(--jobs "${JOBS}"); fi
