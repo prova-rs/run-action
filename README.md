@@ -33,7 +33,7 @@ Run specific files or directories (this bypasses the manifest):
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `version` | `v0.2.6` | The [Prova release](https://github.com/prova-rs/prova/releases) to install |
+| `version` | see [`action.yaml`](./action.yaml) | The [Prova release](https://github.com/prova-rs/prova/releases) to install. **Pin it explicitly in your workflow.** The default tracks releases only as fast as this action is updated, and a number restated here drifts from `action.yaml` independently — it said `v0.2.6` while the action said `v0.10.0` — so it is deliberately not repeated. |
 | `paths` | — | Files/dirs to run. Set this and the manifest is bypassed. |
 | `manifest` | `prova.toml` | Path to the suite manifest |
 | `profile` | — | Manifest profile to run |
