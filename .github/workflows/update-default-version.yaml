@@ -1,0 +1,110 @@
+name: Update Default Version
+
+# Keeps this action's `version` input default in step with prova's latest release, and cuts the tag
+# consumers resolve.
+#
+# Why this exists: every CI workflow in the fleet references `prova-rs/run-action@v1` and takes the
+# default engine version from here. Bumping it by hand meant a prova release could ship while every
+# consumer silently stayed on the previous engine — across the v0.11 → v0.14 deserializer rename
+# (`yaml.parse` → `yaml.decode`, `toml.parse` → `toml.decode`) that meant suites and CI ran different
+# APIs, and the divergence was invisible because `@v1` always *looks* current.
+#
+# prova's release workflow dispatches here on any release that becomes "latest" (prereleases and
+# maintenance lines are gated out on that side). The manual path is for backfills and for re-running
+# a dispatch that didn't land.
+
+on:
+  repository_dispatch:
+    types: [update-default-version]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "prova version tag to default to (e.g. v0.14.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  # Serialize: two releases landing close together must not race on the tag moves below.
+  group: update-default-version
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update default and cut tags
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the next patch tag is derived from the existing ones
+
+      - name: Resolve the requested version
+        id: v
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.event.client_payload.version || inputs.version }}"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error title=Bad version::Expected a vX.Y.Z tag, got '$VERSION'."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Requested default: $VERSION"
+
+      - name: Rewrite the default
+        id: edit
+        shell: bash
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          CURRENT=$(grep -A3 '^  version:' action.yaml | sed -n 's/.*default: "\(v[0-9.]*\)".*/\1/p' | head -1)
+          echo "Current default: ${CURRENT:-<none>}"
+          if [ "$CURRENT" = "$VERSION" ]; then
+            # Idempotent: a re-dispatch, or a manual run for a version already shipped, is a no-op
+            # rather than an empty commit and a pointless tag.
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Already defaulting to $VERSION — nothing to do."
+            exit 0
+          fi
+          # Anchored to the `version:` input's own default line so no other default is touched.
+          perl -0pi -e "s/(^  version:\n(?:    .*\n)*?    default: \")v[0-9.]+(\")/\${1}${VERSION}\${2}/m" action.yaml
+          NEW=$(grep -A3 '^  version:' action.yaml | sed -n 's/.*default: "\(v[0-9.]*\)".*/\1/p' | head -1)
+          if [ "$NEW" != "$VERSION" ]; then
+            echo "::error title=Rewrite failed::action.yaml still reads '${NEW:-<none>}'."
+            exit 1
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Commit, tag, and move v1
+        if: steps.edit.outputs.changed == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add action.yaml
+          git commit -m "chore: default to prova ${VERSION}"
+
+          # Next patch on the v1.0 line, matching how this action has always been tagged.
+          LATEST=$(git tag -l 'v1.0.*' | sort -V | tail -1)
+          NEXT="v1.0.$(( ${LATEST##*.} + 1 ))"
+          echo "Latest: ${LATEST:-<none>} -> cutting ${NEXT}"
+
+          git tag -a "$NEXT" -m "Release $NEXT (prova ${VERSION})"
+          # v1 is the ref consumers pin, so it has to move to the new commit.
+          git tag -f -a v1 "$NEXT^{}" -m "Release $NEXT (prova ${VERSION})"
+
+          git push origin HEAD:${{ github.event.repository.default_branch }}
+          git push origin "$NEXT"
+          git push --force origin v1
+
+          gh release create "$NEXT" \
+            --title "$NEXT" \
+            --notes "Defaults to prova \`${VERSION}\`. Consumers tracking \`prova-rs/run-action@v1\` pick this up automatically." \
+            || echo "::warning::release creation failed; the tags are pushed and consumers are already served"
